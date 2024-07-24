@@ -5,7 +5,7 @@ from qiskit.primitives import StatevectorSampler
 import numpy as np
 
 from qmc_distributions import BinomialTreeModel
-
+from utils import interpolate_inverse_cdf
 
 class ValueAtRisk:
 
@@ -20,16 +20,14 @@ class ValueAtRisk:
 
         self.num_anc = int(np.ceil(np.log2(self.m)))
 
-        self.indices_at_risk = self._compute_histogram_threshold()
+        self.perc_changes = self._compute_losses()
 
-    def _compute_histogram_threshold(self):
-
+    def _compute_losses(self):
+        # TODO: Move to QMC Distribution
         decimal_changes = np.array([np.power(self.u, m) * np.power(self.d, (self.m - m)) - 1.0 for m in range(self.m + 1)])
         perc_changes = (decimal_changes * 100).astype(int)
 
-        indices_at_risk = np.argwhere(perc_changes > self.alpha)
-
-        return indices_at_risk
+        return perc_changes
 
     def risk_measure_circuit(self, threshold):
         d = self.D.distribution_circuit()
@@ -54,15 +52,18 @@ class ValueAtRisk:
 
 if __name__ == "__main__":
     from matplotlib import pyplot as plt
+    import seaborn as sns
     from qiskit.visualization import plot_histogram
 
+    plot = True
     threshold = 3
 
     btm = BinomialTreeModel(mu=0.08, sigma=0.2, T=1, num_steps=6)
     var = ValueAtRisk(0.05, btm)
     qc = var.risk_measure_circuit(threshold=threshold)
-    qc.draw(output="mpl")
-    plt.show()
+    if plot:
+        qc.draw(output="mpl")
+        plt.show()
 
     qc.measure_all()
     sampler = StatevectorSampler()
@@ -100,15 +101,47 @@ if __name__ == "__main__":
         if comp_bit == '1':
             comps += (v / data.meas.num_shots)
 
-    import seaborn as sns
-
     cnt = BinomialTreeModel.convert_measurement(reduced_raw, ket_labels=True)
-    sns.barplot(data=cnt)
-    plt.show()
 
-    sns.barplot(data=sums_meas)
-    plt.show()
+    probs = BinomialTreeModel.convert_measurement(reduced_raw, ket_labels=False)
+    losses = var.perc_changes / 100
+    prob_mass = np.array([[k, losses[k], probs[k], 0] for k in sorted(probs.keys())])
+    prob_mass[:, 3] = np.cumsum(prob_mass[:, 2])
+
+    print(prob_mass)
+    print(f"Estimated CDF at u={threshold}: {cdf_prob}")
+
+    alpha = 0.05
+    tresholds = prob_mass[:, 3] >= alpha
+    tresholds_idx = tresholds.tolist().index(True)
+    print(f"{tresholds_idx=}")
+
+    xvals = np.array([losses[tresholds_idx - 1], losses[tresholds_idx]])
+    Fvals = np.array([prob_mass[tresholds_idx - 1, 3], prob_mass[tresholds_idx, 3]])
+
+    iVar = interpolate_inverse_cdf(var.alpha, xvals, Fvals)
+    print(f"Interpolated {alpha}-Value at risk: {iVar}")
+
+    if plot:
+        sns.barplot(data=cnt)
+        plt.show()
+
+        # sns.barplot(data=sums_meas)
+        # plt.show()
+
+        plt.plot(prob_mass[:, 1], prob_mass[:, 2], 'b-o')
+        plt.fill_between(prob_mass[:tresholds_idx + 1, 1], prob_mass[:tresholds_idx + 1, 2], 0, alpha=0.2, color='r')
+        plt.axvline(iVar, c='r')
+        plt.title("PMF")
+        plt.show()
+
+        plt.plot(prob_mass[:, 1], prob_mass[:, 3], 'b-o')
+        plt.axvline(iVar, c='r')
+        plt.axhline(alpha, c='g')
+        plt.title("CDF")
+        plt.show()
 
 
-    print(cdf_prob)
+
+
 

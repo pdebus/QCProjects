@@ -51,13 +51,8 @@ class BinomialTreeModel:
 
         return counts
 
-    def plot_histogram(self, shots=2048):
+    def simulate(self, shots=2048):
         from qiskit.primitives import StatevectorSampler
-
-        from qiskit.visualization import plot_histogram
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        sns.set_style("whitegrid")
 
         qc = self.distribution_circuit()
         qc.measure_all()
@@ -67,9 +62,16 @@ class BinomialTreeModel:
         data = result[0].data
         raw_counts = data.meas.get_counts()
 
-        #plot_histogram(raw_counts)
-        #plt.show()
+        return raw_counts
 
+    def plot_histogram(self, shots=2048):
+
+        from qiskit.visualization import plot_histogram
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        sns.set_style("whitegrid")
+
+        raw_counts = self.simulate(shots=shots)
         counts = BinomialTreeModel.convert_measurement(raw_counts, ket_labels=True)
 
         labels = []
@@ -88,7 +90,12 @@ class BinomialTreeModel:
         plt.tight_layout()
         plt.show()
 
+        return counts
+
 
 if __name__ == "__main__":
     btm = BinomialTreeModel(mu=0.08, sigma=0.2, T=1, num_steps=6)
     btm.plot_histogram()
+    raw_counts = btm.simulate()
+    counts = BinomialTreeModel.convert_measurement(raw_counts)
+    print(counts)
